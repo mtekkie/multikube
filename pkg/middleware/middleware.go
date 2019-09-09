@@ -1,4 +1,4 @@
-package proxy
+package middleware
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/SermoDigital/jose/crypto"
 	"github.com/SermoDigital/jose/jws"
+	"github.com/amimof/multikube/pkg/config"
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -21,8 +22,8 @@ import (
 type ctxKey string
 
 var (
-	contextKey = ctxKey("Context")
-	subjectKey = ctxKey("Subject")
+	ContextKey = ctxKey("Context")
+	SubjectKey = ctxKey("Subject")
 )
 
 var frontendGauge = prometheus.NewGauge(prometheus.GaugeOpts{
@@ -59,7 +60,7 @@ var responseSize = prometheus.NewHistogramVec(
 )
 
 // Middleware represents a multikube middleware
-type Middleware func(*Config, http.Handler) http.Handler
+type Middleware func(*config.Config, http.Handler) http.Handler
 
 // responseWriter implements http.ResponseWriter and adds status code
 // so that WithLogging middleware can log response status codes
@@ -94,14 +95,14 @@ func (r *responseWriter) WriteHeader(statusCode int) {
 }
 
 // WithEmpty is an empty handler that does nothing
-func WithEmpty(c *Config, next http.Handler) http.Handler {
+func WithEmpty(c *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		next.ServeHTTP(w, r)
 	})
 }
 
 // WithMetrics is an empty handler that does nothing
-func WithMetrics(c *Config, next http.Handler) http.Handler {
+func WithMetrics(c *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pushChain := promhttp.InstrumentHandlerInFlight(frontendGauge,
 			promhttp.InstrumentHandlerDuration(frontendHistogram.MustCurryWith(prometheus.Labels{"handler": "push"}),
@@ -115,7 +116,7 @@ func WithMetrics(c *Config, next http.Handler) http.Handler {
 }
 
 // WithTracing is a middleware that starts a new span and populates the context
-func WithTracing(c *Config, next http.Handler) http.Handler {
+func WithTracing(c *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		span := opentracing.GlobalTracer().StartSpan("hello")
 		ctx := opentracing.ContextWithSpan(r.Context(), span)
@@ -125,7 +126,7 @@ func WithTracing(c *Config, next http.Handler) http.Handler {
 }
 
 // WithLogging applies access log style logging to the HTTP server
-func WithLogging(c *Config, next http.Handler) http.Handler {
+func WithLogging(c *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		lrw := &responseWriter{w, http.StatusOK}
 		next.ServeHTTP(w, r)
@@ -135,7 +136,7 @@ func WithLogging(c *Config, next http.Handler) http.Handler {
 
 // WithJWT is a middleware that parses a JWT token from the requests and propagates
 // the request context with a claim value.
-func WithJWT(c *Config, next http.Handler) http.Handler {
+func WithJWT(c *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		// Get the JWT from the request
@@ -157,7 +158,7 @@ func WithJWT(c *Config, next http.Handler) http.Handler {
 			username = ""
 		}
 
-		ctx := context.WithValue(r.Context(), subjectKey, username)
+		ctx := context.WithValue(r.Context(), SubjectKey , username)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 
@@ -166,7 +167,7 @@ func WithJWT(c *Config, next http.Handler) http.Handler {
 
 // WithX509Validation is a middleware that validates a JWT token in the http request using RS256 signing method.
 // It will do so using a x509 certificate provided in c
-func WithX509Validation(c *Config, next http.Handler) http.Handler {
+func WithX509Validation(c *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		t, err := jws.ParseJWTFromRequest(r)
@@ -192,7 +193,7 @@ func WithX509Validation(c *Config, next http.Handler) http.Handler {
 			username = ""
 		}
 
-		ctx := context.WithValue(r.Context(), subjectKey, username)
+		ctx := context.WithValue(r.Context(), SubjectKey , username)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 
@@ -201,7 +202,7 @@ func WithX509Validation(c *Config, next http.Handler) http.Handler {
 
 // WithJWKValidation is a middleware that validates a JWT token in the http request using RS256 signing method.
 // It will do so using a JWK (Json Web Key) provided in c
-func WithJWKValidation(c *Config, next http.Handler) http.Handler {
+func WithJWKValidation(c *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		t, err := jws.ParseJWTFromRequest(r)
@@ -263,7 +264,7 @@ func WithJWKValidation(c *Config, next http.Handler) http.Handler {
 			username = ""
 		}
 
-		ctx := context.WithValue(r.Context(), subjectKey, username)
+		ctx := context.WithValue(r.Context(), SubjectKey , username)
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 
@@ -272,12 +273,12 @@ func WithJWKValidation(c *Config, next http.Handler) http.Handler {
 
 // WithHeader is a middleware that reads the value of the HTTP header "Multikube-Context"
 // in the request and, if found, sets it's value in the request context.
-func WithHeader(c *Config, next http.Handler) http.Handler {
+func WithHeader(c *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req := r
 		header := r.Header.Get("Multikube-Context")
 		if header != "" {
-			ctx := context.WithValue(r.Context(), contextKey, header)
+			ctx := context.WithValue(r.Context(), ContextKey, header)
 			req = r.WithContext(ctx)
 		}
 		next.ServeHTTP(w, req)
@@ -288,12 +289,12 @@ func WithHeader(c *Config, next http.Handler) http.Handler {
 // tries to determine which kubeconfig context to use for upstream api server requests.
 // If a context is found in the URL path params, the request-context is populated with the value
 // so that other handlers and middlewares may use the information
-func WithCtxRoot(c *Config, next http.Handler) http.Handler {
+func WithCtxRoot(c *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req := r
 		c, rem := getCtxFromURL(r.URL)
 		if c != "" {
-			ctx := context.WithValue(r.Context(), contextKey, c)
+			ctx := context.WithValue(r.Context(), ContextKey, c)
 			req = r.WithContext(ctx)
 			if rem != "" {
 				req.URL.Path = rem

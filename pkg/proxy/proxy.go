@@ -7,7 +7,9 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/amimof/multikube/pkg/config"
 	"golang.org/x/net/http/httpproxy"
+	"github.com/amimof/multikube/pkg/middleware"
 	"io/ioutil"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"net"
@@ -25,7 +27,7 @@ const (
 // Proxy implements an HTTP handler. It has a built-in transport with in-mem cache capabilities.
 type Proxy struct {
 	CertChain  *x509.Certificate
-	Config     *Config
+	Config     *config.Config
 	KubeConfig *api.Config
 	mw         http.Handler
 	transports map[string]http.RoundTripper
@@ -44,19 +46,19 @@ func NewProxy() *Proxy {
 func NewProxyFrom(kc *api.Config) *Proxy {
 	p := NewProxy()
 	p.KubeConfig = kc
-	p.Config = &Config{
+	p.Config = &config.Config{
 		OIDCIssuerURL:     "",
 		OIDCPollInterval:  time.Second * 2,
 		OIDCUsernameClaim: "sub",
 		RS256PublicKey:    &x509.Certificate{},
-		JWKS:              &JWKS{},
+		JWKS:              &config.JWKS{},
 	}
 	return p
 }
 
 // Use chains all middlewares and applies a context to the request flow
-func (p *Proxy) Use(mw ...Middleware) Middleware {
-	return func(c *Config, final http.Handler) http.Handler {
+func (p *Proxy) Use(mw ...middleware.Middleware) middleware.Middleware {
+	return func(c *config.Config, final http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			last := final
 			for i := len(mw) - 1; i >= 0; i-- {
@@ -435,13 +437,13 @@ func getOptions(config *api.Config, n string) *Options {
 func optsFromCtx(ctx context.Context, config *api.Config) *Options {
 
 	// Make sure Subject is set
-	sub, ok := ctx.Value(subjectKey).(string)
+	sub, ok := ctx.Value(middleware.SubjectKey).(string)
 	if !ok || sub == "" {
 		return nil
 	}
 
 	// Make sure Context is set
-	cont, ok := ctx.Value(contextKey).(string)
+	cont, ok := ctx.Value(middleware.ContextKey).(string)
 	if !ok || cont == "" {
 		return nil
 	}
